@@ -8,8 +8,11 @@ It is the software equivalent of "unplug a network cable".
 
 ```
 make docker 
-docker run -it --net=host --privileged arangodb/network-blocker
+docker run -it --net=host --privileged -v /var/run:/var/run arangodb/network-blocker
 ```
+
+The volume mapping to `/var/run` is needed to allow network-blocker to lock on the iptables
+lock file (`/var/run/xtables.lock`)
 
 # API
 
