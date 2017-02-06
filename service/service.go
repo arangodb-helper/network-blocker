@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strconv"
 
+	"github.com/cenkalti/backoff"
 	"github.com/coreos/go-iptables/iptables"
 	"github.com/juju/errgo"
 	logging "github.com/op/go-logging"
@@ -55,16 +56,22 @@ func NewService(config ServiceConfig, deps ServiceDependencies) (*Service, error
 
 // Initialize initializes an iptables chain for this service.
 func (s *Service) Initialize() error {
-	if err := s.client.ClearChain(filterTable, s.chainName); err != nil {
-		return maskAny(err)
+	op := func() error {
+		if err := s.client.ClearChain(filterTable, s.chainName); err != nil {
+			return maskAny(err)
+		}
+		if err := s.client.Append(filterTable, s.chainName, "-j", "RETURN"); err != nil {
+			return maskAny(err)
+		}
+		if err := s.client.Insert(filterTable, "INPUT", 1, "-j", s.chainName); err != nil {
+			return maskAny(err)
+		}
+		if err := s.client.Insert(filterTable, "FORWARD", 1, "-j", s.chainName); err != nil {
+			return maskAny(err)
+		}
+		return nil
 	}
-	if err := s.client.Append(filterTable, s.chainName, "-j", "RETURN"); err != nil {
-		return maskAny(err)
-	}
-	if err := s.client.Insert(filterTable, "INPUT", 1, "-j", s.chainName); err != nil {
-		return maskAny(err)
-	}
-	if err := s.client.Insert(filterTable, "FORWARD", 1, "-j", s.chainName); err != nil {
+	if err := backoff.Retry(op, backoff.NewExponentialBackOff()); err != nil {
 		return maskAny(err)
 	}
 	return nil
@@ -89,46 +96,64 @@ func (s *Service) Cleanup() error {
 
 // RejectTCP actively denies all traffic on the given TCP port
 func (s *Service) RejectTCP(port int) error {
-	if err := s.removeRuleSpecs(port, "DROP"); err != nil {
-		return maskAny(err)
-	}
-	ruleSpec := createPortRuleSpec(port, "REJECT")
-	if found, err := s.client.Exists(filterTable, s.chainName, ruleSpec...); err != nil {
-		s.Logger.Errorf("Failed to check existance of rulespec %q: %v", ruleSpec, err)
-		return maskAny(err)
-	} else if !found {
-		s.Logger.Infof("Denying traffic to TCP port %d", port)
-		if err := s.client.Insert(filterTable, s.chainName, 1, ruleSpec...); err != nil {
-			s.Logger.Errorf("Failed to deny traffic to TCP port %d: %v", port, err)
+	op := func() error {
+		if err := s.removeRuleSpecs(port, "DROP"); err != nil {
 			return maskAny(err)
 		}
+		ruleSpec := createPortRuleSpec(port, "REJECT")
+		if found, err := s.client.Exists(filterTable, s.chainName, ruleSpec...); err != nil {
+			s.Logger.Errorf("Failed to check existance of rulespec %q: %v", ruleSpec, err)
+			return maskAny(err)
+		} else if !found {
+			s.Logger.Infof("Denying traffic to TCP port %d", port)
+			if err := s.client.Insert(filterTable, s.chainName, 1, ruleSpec...); err != nil {
+				s.Logger.Errorf("Failed to deny traffic to TCP port %d: %v", port, err)
+				return maskAny(err)
+			}
+		}
+		return nil
+	}
+	if err := backoff.Retry(op, backoff.NewExponentialBackOff()); err != nil {
+		return maskAny(err)
 	}
 	return nil
 }
 
 // DropTCP silently denies all traffic on the given TCP port
 func (s *Service) DropTCP(port int) error {
-	if err := s.removeRuleSpecs(port, "REJECT"); err != nil {
-		return maskAny(err)
-	}
-	ruleSpec := createPortRuleSpec(port, "DROP")
-	s.Logger.Infof("Denying traffic to TCP port %d", port)
-	if found, err := s.client.Exists(filterTable, s.chainName, ruleSpec...); err != nil {
-		s.Logger.Errorf("Failed to check existance of rulespec %q: %v", ruleSpec, err)
-		return maskAny(err)
-	} else if !found {
-		if err := s.client.Insert(filterTable, s.chainName, 1, ruleSpec...); err != nil {
-			s.Logger.Errorf("Failed to deny traffic to TCP port %d: %v", port, err)
+	op := func() error {
+		if err := s.removeRuleSpecs(port, "REJECT"); err != nil {
 			return maskAny(err)
 		}
+		ruleSpec := createPortRuleSpec(port, "DROP")
+		s.Logger.Infof("Denying traffic to TCP port %d", port)
+		if found, err := s.client.Exists(filterTable, s.chainName, ruleSpec...); err != nil {
+			s.Logger.Errorf("Failed to check existance of rulespec %q: %v", ruleSpec, err)
+			return maskAny(err)
+		} else if !found {
+			if err := s.client.Insert(filterTable, s.chainName, 1, ruleSpec...); err != nil {
+				s.Logger.Errorf("Failed to deny traffic to TCP port %d: %v", port, err)
+				return maskAny(err)
+			}
+		}
+		return nil
+	}
+	if err := backoff.Retry(op, backoff.NewExponentialBackOff()); err != nil {
+		return maskAny(err)
 	}
 	return nil
 }
 
 // AcceptTCP allow all traffic on the given TCP port
 func (s *Service) AcceptTCP(port int) error {
-	s.Logger.Infof("Accepting traffic to TCP port %d", port)
-	if err := s.removeRuleSpecs(port, "REJECT", "DROP"); err != nil {
+	op := func() error {
+		s.Logger.Infof("Accepting traffic to TCP port %d", port)
+		if err := s.removeRuleSpecs(port, "REJECT", "DROP"); err != nil {
+			return maskAny(err)
+		}
+		return nil
+	}
+	if err := backoff.Retry(op, backoff.NewExponentialBackOff()); err != nil {
 		return maskAny(err)
 	}
 	return nil
@@ -136,11 +161,19 @@ func (s *Service) AcceptTCP(port int) error {
 
 // Rules returns a list of all rules injected by this service.
 func (s *Service) Rules() ([]string, error) {
-	list, err := s.client.List(filterTable, s.chainName)
-	if err != nil {
+	var result []string
+	op := func() error {
+		list, err := s.client.List(filterTable, s.chainName)
+		if err != nil {
+			return maskAny(err)
+		}
+		result = list
+		return nil
+	}
+	if err := backoff.Retry(op, backoff.NewExponentialBackOff()); err != nil {
 		return nil, maskAny(err)
 	}
-	return list, nil
+	return result, nil
 }
 
 // removeRuleSpecs removes all rules with given actions to given port.
