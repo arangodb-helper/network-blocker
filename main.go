@@ -11,8 +11,8 @@ import (
 
 	"github.com/arangodb/network-blocker/middleware"
 	"github.com/arangodb/network-blocker/service"
-	"github.com/juju/errgo"
 	logging "github.com/op/go-logging"
+	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 )
 
@@ -35,7 +35,7 @@ var (
 		service.ServiceConfig
 		logLevel string
 	}
-	maskAny = errgo.MaskFunc(errgo.Any)
+	maskAny = errors.WithStack
 )
 
 func init() {

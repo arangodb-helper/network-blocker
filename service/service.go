@@ -8,8 +8,8 @@ import (
 
 	"github.com/cenkalti/backoff"
 	"github.com/coreos/go-iptables/iptables"
-	"github.com/juju/errgo"
 	logging "github.com/op/go-logging"
+	"github.com/pkg/errors"
 )
 
 type ServiceConfig struct {
@@ -202,6 +202,6 @@ func createPortRuleSpec(port int, action string) []string {
 }
 
 func isExitCodeError(err error, exitCode int) bool {
-	eerr, ok := errgo.Cause(err).(*iptables.Error)
+	eerr, ok := errors.Cause(err).(*iptables.Error)
 	return ok && eerr.ExitStatus() == exitCode
 }
