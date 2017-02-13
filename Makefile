@@ -54,6 +54,7 @@ deps:
 $(GOBUILDDIR):
 	@mkdir -p $(ORGDIR)
 	@rm -f $(REPODIR) && ln -s ../../../.. $(REPODIR)
+	@rm -f $(GOBUILDDIR)/src/github.com/coreos && ln -s ../../../vendor/github.com/coreos $(GOBUILDDIR)/src/github.com/coreos
 
 $(BIN): $(GOBUILDDIR) $(SOURCES) 
 	@mkdir -p $(BINDIR)
@@ -76,3 +77,16 @@ ifneq ($(DOCKERNAMESPACE), arangodb)
 	docker tag arangodb/$(PROJECT) $(DOCKERNAMESPACE)/$(PROJECT)
 endif
 	docker push $(DOCKERNAMESPACE)/$(PROJECT)
+
+docker-push-version: docker
+	docker tag arangodb/$(PROJECT) arangodb/$(PROJECT):$(VERSION)
+	docker push arangodb/$(PROJECT):$(VERSION)
+
+release-patch: $(GOBUILDDIR)
+	GOPATH=$(GOBUILDDIR) go run ./tools/release.go -type=patch 
+
+release-minor: $(GOBUILDDIR)
+	GOPATH=$(GOBUILDDIR) go run ./tools/release.go -type=minor
+
+release-major: $(GOBUILDDIR)
+	GOPATH=$(GOBUILDDIR) go run ./tools/release.go -type=major 
