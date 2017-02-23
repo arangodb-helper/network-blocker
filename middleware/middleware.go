@@ -21,6 +21,9 @@ func SetupRoutes(log *logging.Logger, s *service.Service) http.Handler {
 		m.Post("/drop/tcp/:port", handleTcpDrop)
 		m.Post("/reject/tcp/:port", handleTcpReject)
 		m.Post("/accept/tcp/:port", handleTcpAccept)
+		m.Post("/drop/from", handleAllFromDrop)
+		m.Post("/reject/from", handleAllFromReject)
+		m.Post("/accept/from", handleAllFromAccept)
 	})
 
 	return m
@@ -51,6 +54,36 @@ func handleTcpReject(ctx *macaron.Context, s *service.Service) {
 func handleTcpAccept(ctx *macaron.Context, s *service.Service) {
 	port := ctx.ParamsInt("port")
 	if err := s.AcceptTCP(port); err != nil {
+		sendError(ctx, http.StatusInternalServerError, err)
+	} else {
+		sendOK(ctx)
+	}
+}
+
+func handleAllFromDrop(ctx *macaron.Context, s *service.Service) {
+	ip := ctx.Query("ip")
+	intf := ctx.Query("intf")
+	if err := s.DropAllFrom(ip, intf); err != nil {
+		sendError(ctx, http.StatusInternalServerError, err)
+	} else {
+		sendOK(ctx)
+	}
+}
+
+func handleAllFromReject(ctx *macaron.Context, s *service.Service) {
+	ip := ctx.Query("ip")
+	intf := ctx.Query("intf")
+	if err := s.RejectAllFrom(ip, intf); err != nil {
+		sendError(ctx, http.StatusInternalServerError, err)
+	} else {
+		sendOK(ctx)
+	}
+}
+
+func handleAllFromAccept(ctx *macaron.Context, s *service.Service) {
+	ip := ctx.Query("ip")
+	intf := ctx.Query("intf")
+	if err := s.AcceptAllFrom(ip, intf); err != nil {
 		sendError(ctx, http.StatusInternalServerError, err)
 	} else {
 		sendOK(ctx)
